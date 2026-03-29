@@ -2,15 +2,25 @@
 data/preprocessing.py
 ---------------------
 Dataset loading, cleaning, and stratified splitting.
+
+Loading strategy (tried in order)
+----------------------------------
+1. Local CSV  — fastest; pass ``csv_path`` to :func:`load_raw_dataframe`.
+   Download train.csv from:
+   https://www.kaggle.com/competitions/jigsaw-toxic-comment-classification-challenge/data
+   and place it anywhere, then point the config / CLI at it.
+
+2. HuggingFace parquet mirror — no Kaggle account needed, no legacy script.
+   Uses ``datasets`` >= 2.19 with ``data_files`` pointing at a public parquet
+   export, so the deprecated dataset-script path is never triggered.
 """
 
 from __future__ import annotations
 
-import logging
-from typing import Tuple
+from pathlib import Path
+from typing import Tuple, Optional
 
 import pandas as pd
-from datasets import load_dataset
 from sklearn.model_selection import train_test_split
 
 from utils.logger import get_logger
@@ -23,25 +33,124 @@ _TOXICITY_COLS = [
     "threat", "insult", "identity_hate",
 ]
 
+# Public parquet mirror — does NOT use a dataset script, so it works with
+# any modern version of the `datasets` library.
+_HF_PARQUET_URL = (
+    "https://huggingface.co/datasets/tdavidson/hate_speech_offensive"
+    "/resolve/main/data/train.parquet"
+)
 
-def load_raw_dataframe(dataset_name: str = "jigsaw_toxicity_pred") -> pd.DataFrame:
+# Canonical Jigsaw parquet hosted on HF (no script required)
+_JIGSAW_PARQUET_URL = (
+    "https://huggingface.co/datasets/lewtun/jigsaw-toxic-comments"
+    "/resolve/main/data/train-00000-of-00001.parquet"
+)
+
+
+def load_raw_dataframe(csv_path: Optional[str] = None) -> pd.DataFrame:
     """
-    Download the Jigsaw dataset via HuggingFace and return a DataFrame.
+    Load the Jigsaw toxic comment dataset and return a raw DataFrame.
+
+    Loading order
+    -------------
+    1. **Local CSV** (preferred) — if ``csv_path`` is supplied and the file
+       exists, read it directly with pandas.  This is the fastest and most
+       reliable path.  Download ``train.csv`` from Kaggle:
+       https://www.kaggle.com/competitions/jigsaw-toxic-comment-classification-challenge/data
+
+    2. **HuggingFace parquet** (fallback) — downloads a parquet snapshot that
+       does *not* use a dataset script, so it is compatible with
+       ``datasets >= 2.14`` without ``trust_remote_code``.
 
     Parameters
     ----------
-    dataset_name : str
-        HuggingFace dataset identifier.
+    csv_path : str | None
+        Path to a local ``train.csv`` (Kaggle download).  Pass ``None`` to
+        use the HuggingFace parquet fallback.
 
     Returns
     -------
     pd.DataFrame
-        Columns: comment_text + toxicity sub-labels.
+        Columns include ``comment_text`` plus the six toxicity sub-label
+        columns.
     """
-    logger.info("Loading dataset '%s' from HuggingFace Hub…", dataset_name)
-    raw = load_dataset(dataset_name, split="train", trust_remote_code=True)
-    df = raw.to_pandas()
-    logger.info("Loaded %d rows, columns: %s", len(df), list(df.columns))
+    # ── Path 1: local CSV ─────────────────────────────────────────────────
+    if csv_path is not None:
+        path = Path(csv_path)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"CSV not found at '{csv_path}'.\n"
+                "Download train.csv from Kaggle:\n"
+                "  https://www.kaggle.com/competitions/"
+                "jigsaw-toxic-comment-classification-challenge/data\n"
+                "Then pass --csv_path /path/to/train.csv"
+            )
+        logger.info("Loading local CSV: %s", path)
+        df = pd.read_csv(path)
+        logger.info("Loaded %d rows from CSV.", len(df))
+        return df
+
+    # ── Path 2: HuggingFace parquet (no legacy script) ───────────────────
+    logger.info(
+        "No csv_path provided — attempting HuggingFace parquet download…\n"
+        "  Tip: for faster / offline runs, download train.csv from Kaggle\n"
+        "  and pass --csv_path /path/to/train.csv"
+    )
+    try:
+        from datasets import load_dataset  # local import — optional dependency
+
+        ds = load_dataset(
+            "parquet",
+            data_files={"train": _JIGSAW_PARQUET_URL},
+            split="train",
+        )
+        df = ds.to_pandas()
+        logger.info("Loaded %d rows from HuggingFace parquet.", len(df))
+
+        # The parquet mirror may use slightly different column names;
+        # normalise to the expected schema.
+        df = _normalise_columns(df)
+        return df
+
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not load the dataset automatically.\n"
+            f"Reason: {exc}\n\n"
+            "Please download train.csv manually from Kaggle:\n"
+            "  https://www.kaggle.com/competitions/"
+            "jigsaw-toxic-comment-classification-challenge/data\n"
+            "Then run:\n"
+            "  python scripts/train.py --csv_path /path/to/train.csv"
+        ) from exc
+
+
+def _normalise_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Rename columns from alternative mirrors to the canonical Jigsaw schema.
+
+    Canonical required columns:
+      comment_text, toxic, severe_toxic, obscene, threat, insult, identity_hate
+    """
+    rename_map: dict[str, str] = {}
+
+    # Some mirrors use 'text' instead of 'comment_text'
+    if "text" in df.columns and "comment_text" not in df.columns:
+        rename_map["text"] = "comment_text"
+
+    if rename_map:
+        df = df.rename(columns=rename_map)
+        logger.info("Renamed columns: %s", rename_map)
+
+    # Verify all required columns are present
+    required = {"comment_text"} | set(_TOXICITY_COLS)
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"Dataset is missing required columns: {missing}\n"
+            f"Available columns: {list(df.columns)}\n"
+            "Please use the official Kaggle train.csv via --csv_path."
+        )
+
     return df
 
 
