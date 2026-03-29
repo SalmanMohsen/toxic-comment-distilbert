@@ -1,0 +1,14 @@
+# configs/default.yaml
+# All hyperparameters in one place — override any field via CLI flag.
+
+model:
+  name: "distilbert-base-uncased"
+  num_labels: 2
+  max_len: 128          # tokens; covers ~95% of Jigsaw comments
+
+data:
+  dataset_name: "jigsaw_toxicity_pred"
+  sample_size: 20000    # subset for Colab free tier
+  train_ratio: 0.70
+  val_ratio: 0.15
+  test_ratio: 0.15      # must sum to 1.0
