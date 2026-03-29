@@ -1,0 +1,1 @@
+{"run_id": "distilbert-base-uncased-lr2e-05-ep3-seed42", "model": "distilbert-base-uncased", "lr": 2e-05, "batch_size": 16, "max_len": 128, "epochs_run": 3, "best_val_f1": 0.9739, "test_f1": 0.9768, "test_auroc": 0.9856, "checkpoint": "checkpoints/checkpoint_epoch3_f10.9739.pt", "elapsed_minutes": 36.2, "timestamp": "2026-03-29T23:37:28.042570"}
