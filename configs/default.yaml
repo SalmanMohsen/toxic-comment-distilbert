@@ -7,8 +7,11 @@ model:
   max_len: 128          # tokens; covers ~95% of Jigsaw comments
 
 data:
-  dataset_name: "jigsaw_toxicity_pred"
-  sample_size: 20000    # subset for Colab free tier
+  # Path to the Kaggle train.csv — fastest and most reliable.
+  # Download from: https://www.kaggle.com/competitions/jigsaw-toxic-comment-classification-challenge/data
+  # Set to null to use the HuggingFace parquet fallback (requires internet).
+  csv_path: null
+  sample_size: 10000    # 10k is safe for 2 GB VRAM; increase to 20000 on Colab T4
   train_ratio: 0.70
   val_ratio: 0.15
   test_ratio: 0.15      # must sum to 1.0
@@ -16,7 +19,7 @@ data:
 training:
   seed: 42
   epochs: 3
-  batch_size: 32
+  batch_size: 16        # 16 fits in 2 GB VRAM (940MX); use 32 on Colab T4
   learning_rate: 2.0e-5
   weight_decay: 0.01
   warmup_ratio: 0.10    # fraction of total steps used for linear warmup
